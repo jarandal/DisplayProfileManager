@@ -391,11 +391,40 @@ namespace DisplayProfileManager.Helpers
             public DISPLAYCONFIG_COLOR_ENCODING ColorEncoding { get; set; } = DISPLAYCONFIG_COLOR_ENCODING.DISPLAYCONFIG_COLOR_ENCODING_RGB;
             public uint BitsPerColorChannel { get; set; } = 8;
             public DISPLAYCONFIG_ROTATION Rotation { get; set; } = DISPLAYCONFIG_ROTATION.DISPLAYCONFIG_ROTATION_IDENTITY;
+
+            // --- NUEVAS PROPIEDADES PARA IDENTIFICACIÓN ESTABLE ---
+            // Identificadores de conexión física
+            public string PhysicalConnectionId { get; set; } = string.Empty;
+            public string ConnectionType { get; set; } = string.Empty;
+            public uint ConnectorInstance { get; set; } = 0;
+
+            // Identificadores EDID (desde WMI)
+            public string ManufacturerName { get; set; } = string.Empty;
+            public string ProductCodeID { get; set; } = string.Empty;
+            public string SerialNumberID { get; set; } = string.Empty;
         }
 
         #endregion
 
         #region Public Methods
+
+        /// <summary>
+        /// Convierte el enum de tecnología de salida a un string legible
+        /// </summary>
+        private static string GetConnectionTypeName(DisplayConfigVideoOutputTechnology technology)
+        {
+            return technology.ToString().Replace("DISPLAYCONFIG_OUTPUT_TECHNOLOGY_", "");
+        }
+
+        /// <summary>
+        /// Construye un identificador único de conexión física basado en el adaptador, tipo de conexión, instancia del conector y TargetId
+        /// </summary>
+        private static string BuildPhysicalConnectionId(DisplayConfigInfo config)
+        {
+            // Formato: {AdapterId}-{OutputTechName}-{ConnectorInstance}-{TargetId}
+            string adapterIdStr = $"{config.AdapterId.HighPart:X8}{config.AdapterId.LowPart:X8}";
+            return $"{adapterIdStr}-{config.ConnectionType}-{config.ConnectorInstance}-{config.TargetId}";
+        }
 
         public static List<DisplayConfigInfo> GetDisplayConfigs()
         {
@@ -403,6 +432,10 @@ namespace DisplayProfileManager.Helpers
 
             try
             {
+                // 1. Obtener información de WMI una sola vez para eficiencia
+                var wmiMonitors = DisplayHelper.GetMonitorsFromWin32PnPEntity();
+                var wmiMonitorIDs = DisplayHelper.GetMonitorIDsFromWmiMonitorID();
+
                 uint pathCount = 0;
                 uint modeCount = 0;
 
@@ -480,7 +513,29 @@ namespace DisplayProfileManager.Helpers
                     if (result == ERROR_SUCCESS)
                     {
                         displayConfig.FriendlyName = targetName.monitorFriendlyDeviceName;
+                        displayConfig.ConnectorInstance = targetName.connectorInstance;
                     }
+
+                    // --- NUEVA LÓGICA DE IDENTIFICACIÓN ---
+                    // Correlacionar con WMI para obtener identificadores EDID
+                    var foundWmiMonitor = wmiMonitors.Find(x => x.DeviceID.Contains($"UID{displayConfig.TargetId}"));
+                    if (foundWmiMonitor != null)
+                    {
+                        var foundMonitorId = wmiMonitorIDs.Find(x => x.InstanceName.ToUpper().Contains(foundWmiMonitor.PnPDeviceID.ToUpper()));
+                        if (foundMonitorId != null)
+                        {
+                            displayConfig.ManufacturerName = foundMonitorId.ManufacturerName;
+                            displayConfig.ProductCodeID = foundMonitorId.ProductCodeID;
+                            displayConfig.SerialNumberID = foundMonitorId.SerialNumberID;
+                        }
+                    }
+
+                    // Construir PhysicalConnectionId y ConnectionType
+                    displayConfig.ConnectionType = GetConnectionTypeName(displayConfig.OutputTechnology);
+                    displayConfig.PhysicalConnectionId = BuildPhysicalConnectionId(displayConfig);
+
+                    logger.Debug($"Display Config Captured: {displayConfig.FriendlyName} on {displayConfig.ConnectionType} ({displayConfig.PhysicalConnectionId})");
+                    // --- FIN DE LA NUEVA LÓGICA ---
 
                     // Get HDR information
                     var colorInfo = new DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO();

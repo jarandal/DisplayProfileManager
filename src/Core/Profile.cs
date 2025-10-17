@@ -144,6 +144,15 @@ namespace DisplayProfileManager.Core
         [JsonProperty("rotation")]
         public int Rotation { get; set; } = 1; // Default to IDENTITY (1)
 
+        [JsonProperty("physicalConnectionId")]
+        public string PhysicalConnectionId { get; set; } = string.Empty;
+
+        [JsonProperty("connectionType")]
+        public string ConnectionType { get; set; } = string.Empty;
+
+        [JsonProperty("connectorInstance")]
+        public uint ConnectorInstance { get; set; } = 0;
+
         public DisplaySetting()
         {
         }

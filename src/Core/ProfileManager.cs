@@ -179,126 +179,95 @@ namespace DisplayProfileManager.Core
             return await Task.Run(() =>
             {
                 var settings = new List<DisplaySetting>();
-
                 try
                 {
-                    logger.Debug("Getting current display settings...");
+                    logger.Debug("Getting current display settings using unified DisplayConfigHelper...");
 
-                    List<DisplayHelper.DisplayInfo> displays = DisplayHelper.GetDisplays();
-
-                    // Get monitor information using WMI
-                    List<DisplayHelper.MonitorInfo> monitors = DisplayHelper.GetMonitorsFromWin32PnPEntity();
-
-                    List<DisplayHelper.MonitorIdInfo> monitorIDs = DisplayHelper.GetMonitorIDsFromWmiMonitorID();
-
-                    // Get display configs using QueueDisplayConfig
                     List<DisplayConfigHelper.DisplayConfigInfo> displayConfigs = DisplayConfigHelper.GetDisplayConfigs();
-                    
-                    if (displays.Count > 0 &&
-                        monitors.Count > 0 &&
-                        monitorIDs.Count > 0 &&
-                        displayConfigs.Count > 0)
+                    var activeConfigs = displayConfigs.Where(d => d.IsEnabled).ToList();
+
+                    foreach (var config in activeConfigs)
                     {
-                        for (int i = 0; i < displays.Count; i++)
+                        DpiHelper.DPIScalingInfo dpiInfo = DpiHelper.GetDPIScalingInfo(config.DeviceName);
+
+                        DisplaySetting setting = new DisplaySetting
                         {
-                            var foundConfig = displayConfigs.Find(x => x.DeviceName == displays[i].DeviceName);
+                            DeviceName = config.DeviceName,
+                            ReadableDeviceName = config.FriendlyName,
+                            Width = config.Width,
+                            Height = config.Height,
+                            Frequency = (int)config.RefreshRate,
+                            DpiScaling = dpiInfo.Current,
+                            IsPrimary = config.IsPrimary,
+                            AdapterId = $"{config.AdapterId.HighPart:X8}{config.AdapterId.LowPart:X8}",
+                            SourceId = config.SourceId,
+                            IsEnabled = config.IsEnabled,
+                            PathIndex = config.PathIndex,
+                            TargetId = config.TargetId,
+                            DisplayPositionX = config.DisplayPositionX,
+                            DisplayPositionY = config.DisplayPositionY,
+                            IsHdrSupported = config.IsHdrSupported,
+                            IsHdrEnabled = config.IsHdrEnabled,
+                            Rotation = (int)config.Rotation,
 
-                            if (foundConfig == null)
+                            // NUEVO: Guardar identificadores de conexión física
+                            PhysicalConnectionId = config.PhysicalConnectionId,
+                            ConnectionType = config.ConnectionType,
+                            ConnectorInstance = config.ConnectorInstance,
+
+                            // Identificadores EDID
+                            ManufacturerName = config.ManufacturerName,
+                            ProductCodeID = config.ProductCodeID,
+                            SerialNumberID = config.SerialNumberID
+                        };
+
+                        logger.Debug($"PROFILE DEBUG: Creating DisplaySetting for {setting.DeviceName}:");
+                        logger.Debug($"PROFILE DEBUG:   HDR Supported: {setting.IsHdrSupported}");
+                        logger.Debug($"PROFILE DEBUG:   HDR Enabled: {setting.IsHdrEnabled}");
+                        logger.Debug($"PROFILE DEBUG:   PhysicalConnectionId: {setting.PhysicalConnectionId}");
+                        logger.Debug($"PROFILE DEBUG:   ConnectionType: {setting.ConnectionType}");
+
+                        // Capture available options for this monitor
+                        try
+                        {
+                            // Get available resolutions
+                            setting.AvailableResolutions = DisplayHelper.GetSupportedResolutionsOnly(setting.DeviceName);
+
+                            // Get available DPI scaling
+                            var dpiValues = DpiHelper.GetSupportedDPIScalingOnly(setting.DeviceName);
+                            setting.AvailableDpiScaling = dpiValues.ToList();
+
+                            // Get available refresh rates for each resolution
+                            setting.AvailableRefreshRates = new Dictionary<string, List<int>>();
+                            foreach (var resolution in setting.AvailableResolutions)
                             {
-                                logger.Debug("No display config found for " + displays[i].DeviceName);
-                                continue;
-                            }
-
-                            var foundMonitor = monitors.Find(x => x.DeviceID.Contains($"UID{foundConfig.TargetId}"));
-
-                            if (foundMonitor == null)
-                            {
-                                logger.Debug("No monitor found for " + foundConfig.TargetId);
-                                continue;
-                            }
-
-                            var foundMonitorId = monitorIDs.Find(x => x.InstanceName.ToUpper().Contains(foundMonitor.PnPDeviceID.ToUpper()));
-
-                            if(foundMonitorId == null)
-                            {
-                                logger.Debug("No monitor ID found for " + foundMonitor.PnPDeviceID);
-                                continue;
-                            }    
-
-                            string adpaterIdText = $"{foundConfig.AdapterId.HighPart:X8}{foundConfig.AdapterId.LowPart:X8}";
-                            DpiHelper.DPIScalingInfo dpiInfo = DpiHelper.GetDPIScalingInfo(displays[i].DeviceName);
-
-                            DisplaySetting setting = new DisplaySetting();
-                            setting.DeviceName = displays[i].DeviceName;
-                            setting.DeviceString = displays[i].DeviceString;
-                            setting.ReadableDeviceName = foundMonitor.Name;
-                            setting.Width = foundConfig.Width;
-                            setting.Height = foundConfig.Height;
-                            setting.Frequency = displays[i].Frequency;
-                            setting.DpiScaling = dpiInfo.Current;
-                            setting.IsPrimary = displays[i].IsPrimary;
-                            setting.AdapterId = adpaterIdText;
-                            setting.SourceId = foundConfig.SourceId;
-                            setting.IsEnabled = foundConfig.IsEnabled;
-                            setting.PathIndex = foundConfig.PathIndex;
-                            setting.TargetId = foundConfig.TargetId;
-                            setting.DisplayPositionX = foundConfig.DisplayPositionX;
-                            setting.DisplayPositionY = foundConfig.DisplayPositionY;
-                            setting.IsHdrSupported = foundConfig.IsHdrSupported;
-                            setting.IsHdrEnabled = foundConfig.IsHdrEnabled;
-                            setting.Rotation = (int)foundConfig.Rotation;
-                            
-                            logger.Debug($"PROFILE DEBUG: Creating DisplaySetting for {setting.DeviceName}:");
-                            logger.Debug($"PROFILE DEBUG:   HDR Supported: {setting.IsHdrSupported}");
-                            logger.Debug($"PROFILE DEBUG:   HDR Enabled: {setting.IsHdrEnabled}");
-                            logger.Debug($"PROFILE DEBUG:   TargetId: {setting.TargetId}");
-                            logger.Debug($"PROFILE DEBUG:   AdapterId: {setting.AdapterId}");
-                            setting.ManufacturerName = foundMonitorId.ManufacturerName;
-                            setting.ProductCodeID = foundMonitorId.ProductCodeID;
-                            setting.SerialNumberID = foundMonitorId.SerialNumberID;
-
-                            // Capture available options for this monitor
-                            try
-                            {
-                                // Get available resolutions
-                                setting.AvailableResolutions = DisplayHelper.GetSupportedResolutionsOnly(setting.DeviceName);
-
-                                // Get available DPI scaling
-                                var dpiValues = DpiHelper.GetSupportedDPIScalingOnly(setting.DeviceName);
-                                setting.AvailableDpiScaling = dpiValues.ToList();
-
-                                // Get available refresh rates for each resolution
-                                setting.AvailableRefreshRates = new Dictionary<string, List<int>>();
-                                foreach (var resolution in setting.AvailableResolutions)
+                                var parts = resolution.Split('x');
+                                if (parts.Length == 2 &&
+                                    int.TryParse(parts[0], out int width) &&
+                                    int.TryParse(parts[1], out int height))
                                 {
-                                    var parts = resolution.Split('x');
-                                    if (parts.Length == 2 &&
-                                        int.TryParse(parts[0], out int width) &&
-                                        int.TryParse(parts[1], out int height))
+                                    var refreshRates = DisplayHelper.GetAvailableRefreshRates(setting.DeviceName, width, height);
+                                    if (refreshRates.Count > 0)
                                     {
-                                        var refreshRates = DisplayHelper.GetAvailableRefreshRates(setting.DeviceName, width, height);
-                                        if (refreshRates.Count > 0)
-                                        {
-                                            setting.AvailableRefreshRates[resolution] = refreshRates;
-                                        }
+                                        setting.AvailableRefreshRates[resolution] = refreshRates;
                                     }
                                 }
-
-                                logger.Debug($"Captured available options for {setting.DeviceName}: " +
-                                    $"{setting.AvailableResolutions.Count} resolutions, " +
-                                    $"{setting.AvailableDpiScaling.Count} DPI values, " +
-                                    $"{setting.AvailableRefreshRates.Count} resolution-refresh rate mappings");
-                            }
-                            catch (Exception ex)
-                            {
-                                logger.Error(ex, $"Error capturing available options for {setting.DeviceName}");
                             }
 
-                            settings.Add(setting);
+                            logger.Debug($"Captured available options for {setting.DeviceName}: " +
+                                $"{setting.AvailableResolutions.Count} resolutions, " +
+                                $"{setting.AvailableDpiScaling.Count} DPI values, " +
+                                $"{setting.AvailableRefreshRates.Count} resolution-refresh rate mappings");
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Error(ex, $"Error capturing available options for {setting.DeviceName}");
                         }
 
-                        logger.Info($"Found {settings.Count} display settings");
+                        settings.Add(setting);
                     }
+
+                    logger.Info($"Found {settings.Count} display settings");
                 }
                 catch (Exception ex)
                 {
@@ -309,42 +278,130 @@ namespace DisplayProfileManager.Core
             });
         }
 
+        /// <summary>
+        /// Encuentra el mejor monitor del sistema que coincide con un monitor del perfil usando una estrategia jerárquica
+        /// </summary>
+        private DisplayConfigHelper.DisplayConfigInfo FindBestMatchForProfile(
+            DisplaySetting profileSetting,
+            List<DisplayConfigHelper.DisplayConfigInfo> systemDisplays)
+        {
+            logger.Debug($"Finding match for profile monitor: {profileSetting.ReadableDeviceName} (ConnectionId: {profileSetting.PhysicalConnectionId})");
+
+            // Nivel 1: Coincidencia de conexión física exacta.
+            if (!string.IsNullOrEmpty(profileSetting.PhysicalConnectionId))
+            {
+                var exactMatch = systemDisplays.FirstOrDefault(d => d.PhysicalConnectionId == profileSetting.PhysicalConnectionId);
+                if (exactMatch != null)
+                {
+                    logger.Info($"✓ Nivel 1 - Coincidencia de conexión exacta: {exactMatch.FriendlyName} via {exactMatch.ConnectionType}");
+                    return exactMatch;
+                }
+            }
+
+            // Nivel 2: Coincidencia por EDID (mismo monitor físico, posiblemente otra conexión).
+            var edidMatches = systemDisplays.Where(d =>
+                !string.IsNullOrEmpty(profileSetting.ManufacturerName) &&
+                d.ManufacturerName == profileSetting.ManufacturerName &&
+                d.ProductCodeID == profileSetting.ProductCodeID &&
+                (string.IsNullOrEmpty(profileSetting.SerialNumberID) || profileSetting.SerialNumberID == "0" || d.SerialNumberID == profileSetting.SerialNumberID)
+            ).ToList();
+
+            if (edidMatches.Any())
+            {
+                // Priorizar monitores activos, luego el mismo tipo de conexión.
+                var bestEdidMatch = edidMatches
+                    .OrderByDescending(d => d.IsEnabled ? 1 : 0)
+                    .ThenByDescending(d => d.ConnectionType == profileSetting.ConnectionType ? 1 : 0)
+                    .First();
+                logger.Info($"✓ Nivel 2 - Coincidencia EDID: {bestEdidMatch.FriendlyName} via {bestEdidMatch.ConnectionType}");
+                return bestEdidMatch;
+            }
+
+            // Nivel 3: Fallback a FriendlyName + AdapterId.
+            var nameAdapterMatch = systemDisplays.FirstOrDefault(d =>
+                d.FriendlyName == profileSetting.ReadableDeviceName &&
+                $"{d.AdapterId.HighPart:X8}{d.AdapterId.LowPart:X8}" == profileSetting.AdapterId
+            );
+            if (nameAdapterMatch != null)
+            {
+                logger.Info($"✓ Nivel 3 - Coincidencia por Nombre+Adaptador: {nameAdapterMatch.FriendlyName}");
+                return nameAdapterMatch;
+            }
+
+            // Nivel 4: Fallback final a solo FriendlyName.
+            var nameMatch = systemDisplays.FirstOrDefault(d => d.FriendlyName == profileSetting.ReadableDeviceName);
+            if (nameMatch != null)
+            {
+                logger.Warn($"⚠ Nivel 4 - Coincidencia de respaldo por nombre: {nameMatch.FriendlyName}. Esto puede ser incorrecto.");
+                return nameMatch;
+            }
+
+            logger.Error($"✗ NO SE ENCONTRÓ COINCIDENCIA para '{profileSetting.ReadableDeviceName}'");
+            return null;
+        }
+
         public async Task<ProfileApplyResult> ApplyProfileAsync(Profile profile)
         {
             try
             {
-                ProfileApplyResult result = new ProfileApplyResult { AudioSuccess = true }; // Init audio as true
+                ProfileApplyResult result = new ProfileApplyResult { AudioSuccess = true };
 
-                // Step 1: Prepare the display configuration from the profile
+                // Step 1: Obtener la configuración completa del sistema (monitores activos e inactivos).
+                var currentSystemDisplays = DisplayConfigHelper.GetDisplayConfigs();
+                if (currentSystemDisplays.Count == 0)
+                {
+                    logger.Error("ApplyProfileAsync: No se pudo obtener la configuración de pantalla actual del sistema.");
+                    return new ProfileApplyResult { Success = false };
+                }
+
+                // Step 2: Preparar la configuración de pantalla de destino emparejando monitores del perfil con monitores del sistema.
                 var displayConfigs = new List<DisplayConfigHelper.DisplayConfigInfo>();
                 if (profile.DisplaySettings.Count > 0)
                 {
-                    foreach (var setting in profile.DisplaySettings)
+                    foreach (var profileSetting in profile.DisplaySettings)
                     {
-                        setting.UpdateDeviceNameFromWMI();
-                        displayConfigs.Add(new DisplayConfigHelper.DisplayConfigInfo
+                        // Usar la nueva lógica de emparejamiento jerárquico
+                        var matchedSystemDisplay = FindBestMatchForProfile(profileSetting, currentSystemDisplays);
+
+                        if (matchedSystemDisplay != null)
                         {
-                            DeviceName = setting.DeviceName,
-                            IsEnabled = setting.IsEnabled,
-                            IsPrimary = setting.IsPrimary,
-                            Width = setting.Width,
-                            Height = setting.Height,
-                            RefreshRate = setting.Frequency,
-                            IsHdrSupported = setting.IsHdrSupported,
-                            IsHdrEnabled = setting.IsHdrEnabled,
-                            Rotation = (DisplayConfigHelper.DISPLAYCONFIG_ROTATION)setting.Rotation,
-                            AdapterId = DisplayConfigHelper.GetLUIDFromString(setting.AdapterId),
-                            SourceId = setting.SourceId,
-                            TargetId = setting.TargetId,
-                            PathIndex = setting.PathIndex,
-                            DisplayPositionX = setting.DisplayPositionX,
-                            DisplayPositionY = setting.DisplayPositionY,
-                            FriendlyName = setting.ReadableDeviceName
-                        });
+                            // Crear una nueva configuración usando los identificadores actuales del sistema,
+                            // pero con los ajustes deseados del perfil.
+                            displayConfigs.Add(new DisplayConfigHelper.DisplayConfigInfo
+                            {
+                                // Ajustes deseados del perfil
+                                IsEnabled = profileSetting.IsEnabled,
+                                IsPrimary = profileSetting.IsPrimary,
+                                Width = profileSetting.Width,
+                                Height = profileSetting.Height,
+                                RefreshRate = profileSetting.Frequency,
+                                IsHdrEnabled = profileSetting.IsHdrEnabled,
+                                Rotation = (DisplayConfigHelper.DISPLAYCONFIG_ROTATION)profileSetting.Rotation,
+                                DisplayPositionX = profileSetting.DisplayPositionX,
+                                DisplayPositionY = profileSetting.DisplayPositionY,
+
+                                // Identificadores actuales del sistema
+                                DeviceName = matchedSystemDisplay.DeviceName,
+                                AdapterId = matchedSystemDisplay.AdapterId,
+                                SourceId = matchedSystemDisplay.SourceId,
+                                TargetId = matchedSystemDisplay.TargetId,
+
+                                // Otra información útil
+                                PathIndex = matchedSystemDisplay.PathIndex,
+                                FriendlyName = matchedSystemDisplay.FriendlyName,
+                                PhysicalConnectionId = matchedSystemDisplay.PhysicalConnectionId,
+                                ConnectionType = matchedSystemDisplay.ConnectionType,
+                                IsHdrSupported = matchedSystemDisplay.IsHdrSupported // Usar el soporte actual del sistema
+                            });
+                        }
+                        else
+                        {
+                            logger.Warn($"No se pudo encontrar un monitor del sistema coincidente para el monitor del perfil '{profileSetting.ReadableDeviceName}'. Podría estar desconectado.");
+                        }
                     }
                 }
 
-                // Step 2: Set Primary Display first (adjusts positions in the config list)
+                // Step 3: Set Primary Display first (adjusts positions in the config list)
                 if (displayConfigs.Count > 0)
                 {
                     logger.Debug("Setting primary display...");
@@ -360,7 +417,7 @@ namespace DisplayProfileManager.Core
                     }
                 }
 
-                // Step 3: Choose application path (Staged or Simple)
+                // Step 4: Choose application path (Staged or Simple)
                 if (_settingsManager.ShouldUseStagedApplication() && displayConfigs.Count > 1)
                 {
                     logger.Info("Using staged application path.");
@@ -371,49 +428,57 @@ namespace DisplayProfileManager.Core
                 {
                     logger.Info("Using simple application path.");
                     // --- Simple Path Logic ---
-                    // 3.1: Apply Topology
+                    // 4.1: Apply Topology
                     result.DisplayConfigApplied = DisplayConfigHelper.ApplyDisplayTopology(displayConfigs);
                     if(result.DisplayConfigApplied)
                     {
-                        // 3.2: Apply Resolution/Frequency
+                        // 4.2: Apply Resolution/Frequency
                         logger.Info("Applying resolution and refresh rate for all enabled monitors...");
                         bool allResolutionsChanged = true;
-                        foreach (var setting in profile.DisplaySettings.Where(s => s.IsEnabled))
+                        foreach (var displayConfig in displayConfigs.Where(d => d.IsEnabled))
                         {
-                            if (DisplayHelper.IsMonitorConnected(setting.DeviceName))
+                            if (DisplayHelper.IsMonitorConnected(displayConfig.DeviceName))
                             {
-                                if (!DisplayHelper.ChangeResolution(setting.DeviceName, setting.Width, setting.Height, setting.Frequency))
+                                if (!DisplayHelper.ChangeResolution(displayConfig.DeviceName, displayConfig.Width, displayConfig.Height, (int)displayConfig.RefreshRate))
                                 {
-                                    logger.Warn($"Failed to change resolution for {setting.DeviceName}");
+                                    logger.Warn($"Failed to change resolution for {displayConfig.DeviceName}");
                                     allResolutionsChanged = false;
                                 }
                                 else
                                 {
-                                    logger.Info($"Successfully changed resolution for {setting.DeviceName} to {setting.Width}x{setting.Height}@{setting.Frequency}Hz");
+                                    logger.Info($"Successfully changed resolution for {displayConfig.DeviceName} to {displayConfig.Width}x{displayConfig.Height}@{displayConfig.RefreshRate}Hz");
                                 }
                             }
                         }
                         result.ResolutionChanged = allResolutionsChanged;
                     }
                 }
-                
-                // Step 4: Apply DPI and Final HDR (DPI is always separate, HDR is final confirmation)
+
+                // Step 5: Apply DPI and Final HDR (DPI is always separate, HDR is final confirmation)
                 if (result.DisplayConfigApplied)
                 {
                     bool allDpiChanged = true;
-                    foreach (var setting in profile.DisplaySettings.Where(s => s.IsEnabled))
+                    foreach (var displayConfig in displayConfigs.Where(d => d.IsEnabled))
                     {
-                        if (DisplayHelper.IsMonitorConnected(setting.DeviceName))
+                        if (DisplayHelper.IsMonitorConnected(displayConfig.DeviceName))
                         {
-                            if(!DpiHelper.SetDPIScaling(setting.DeviceName, setting.DpiScaling))
+                            // Buscar el DPI del perfil original para este display
+                            var profileSetting = profile.DisplaySettings.FirstOrDefault(s =>
+                                s.ReadableDeviceName == displayConfig.FriendlyName ||
+                                s.PhysicalConnectionId == displayConfig.PhysicalConnectionId);
+
+                            if (profileSetting != null)
                             {
-                                logger.Warn($"Failed to set DPI scaling for {setting.DeviceName}");
-                                allDpiChanged = false;
+                                if(!DpiHelper.SetDPIScaling(displayConfig.DeviceName, profileSetting.DpiScaling))
+                                {
+                                    logger.Warn($"Failed to set DPI scaling for {displayConfig.DeviceName}");
+                                    allDpiChanged = false;
+                                }
                             }
                         }
                     }
                     result.DpiChanged = allDpiChanged;
-                    
+
                     logger.Debug("Applying final HDR settings...");
                     if (!DisplayConfigHelper.ApplyHdrSettings(displayConfigs))
                     {
@@ -423,7 +488,7 @@ namespace DisplayProfileManager.Core
 
                 result.Success = result.PrimaryChanged && result.DisplayConfigApplied && result.ResolutionChanged && result.DpiChanged;
 
-                // Step 5: Apply Audio Settings (common to both paths)
+                // Step 6: Apply Audio Settings (common to both paths)
                 if (profile.AudioSettings != null)
                 {
                     result.AudioSuccess = AudioHelper.ApplyAudioSettings(profile.AudioSettings);
@@ -757,13 +822,16 @@ namespace DisplayProfileManager.Core
                     PathIndex = ds.PathIndex,
                     TargetId = ds.TargetId,
                     DisplayPositionX = ds.DisplayPositionX,
+                    DisplayPositionY = ds.DisplayPositionY,
                     IsHdrSupported = ds.IsHdrSupported,
                     IsHdrEnabled = ds.IsHdrEnabled,
                     Rotation = ds.Rotation,
-                    DisplayPositionY = ds.DisplayPositionY,
                     ManufacturerName = ds.ManufacturerName,
                     ProductCodeID = ds.ProductCodeID,
                     SerialNumberID = ds.SerialNumberID,
+                    PhysicalConnectionId = ds.PhysicalConnectionId,
+                    ConnectionType = ds.ConnectionType,
+                    ConnectorInstance = ds.ConnectorInstance,
                     AvailableResolutions = ds.AvailableResolutions != null ? new List<string>(ds.AvailableResolutions) : new List<string>(),
                     AvailableDpiScaling = ds.AvailableDpiScaling != null ? new List<uint>(ds.AvailableDpiScaling) : new List<uint>(),
                     AvailableRefreshRates = ds.AvailableRefreshRates != null ? new Dictionary<string, List<int>>(ds.AvailableRefreshRates.ToDictionary(kvp => kvp.Key, kvp => new List<int>(kvp.Value))) : new Dictionary<string, List<int>>()

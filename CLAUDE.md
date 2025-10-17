@@ -75,3 +75,4 @@ cmd.exe //c "start bin\Debug\DisplayProfileManager.exe"
 - `/src/Core/`: Business logic (ProfileManager, SettingsManager)
 - `/src/UI/`: WPF views and ViewModels
 - `/src/Helpers/`: P/Invoke wrappers and utilities
+- NUNCA intentes compilar , ni ejecutar. estamos en wsl. Pideme a mi que compile.
