@@ -238,8 +238,18 @@ namespace DisplayProfileManager.UI.Windows
                 _profile.Name = ProfileNameTextBox.Text.Trim();
                 _profile.Description = ProfileDescriptionTextBox.Text.Trim();
 
-                // Solo capturar configuración CCD si es un perfil nuevo o si no tiene datos CCD
-                // Si ya tiene datos CCD, solo actualizamos los DisplaySettings desde la GUI
+                // Actualizar DisplaySettings desde los controles UI
+                _profile.DisplaySettings.Clear();
+                foreach (var control in _displayControls)
+                {
+                    var setting = control.GetDisplaySetting();
+                    if (setting != null)
+                    {
+                        _profile.DisplaySettings.Add(setting);
+                    }
+                }
+
+                // Verificar si los datos CCD necesitan ser capturados o filtrados
                 bool needsCcdCapture = (_profile.CcdPaths == null || _profile.CcdPaths.Count == 0);
 
                 if (needsCcdCapture)
@@ -258,18 +268,72 @@ namespace DisplayProfileManager.UI.Windows
                 }
                 else
                 {
-                    logger.Info($"Perfil existente '{_profile.Name}' - actualizando solo DisplaySettings desde GUI");
-                }
+                    // Perfil existente con datos CCD - filtrar CcdPaths para que coincidan con DisplaySettings
+                    logger.Info($"Perfil existente '{_profile.Name}' - filtrando datos CCD según DisplaySettings editados");
 
-                // Actualizar DisplaySettings desde los controles UI
-                _profile.DisplaySettings.Clear();
-                foreach (var control in _displayControls)
-                {
-                    var setting = control.GetDisplaySetting();
-                    if (setting != null)
+                    // Obtener TargetIds de los monitores en DisplaySettings
+                    var targetIdsInProfile = new HashSet<uint>(_profile.DisplaySettings.Select(s => s.TargetId));
+
+                    // Filtrar CcdPaths para mantener solo los monitores que están en DisplaySettings
+                    var filteredPaths = _profile.CcdPaths.Where(p => targetIdsInProfile.Contains(p.TargetId)).ToList();
+
+                    // Actualizar flags de activo/inactivo según DisplaySettings
+                    foreach (var path in filteredPaths)
                     {
-                        _profile.DisplaySettings.Add(setting);
+                        var displaySetting = _profile.DisplaySettings.FirstOrDefault(s => s.TargetId == path.TargetId);
+                        if (displaySetting != null)
+                        {
+                            if (displaySetting.IsEnabled)
+                            {
+                                path.Flags |= 0x00000001; // DISPLAYCONFIG_PATH_ACTIVE
+                            }
+                            else
+                            {
+                                path.Flags &= ~0x00000001u; // Remove DISPLAYCONFIG_PATH_ACTIVE
+                            }
+                        }
                     }
+
+                    // Obtener índices de modos que están siendo usados por los paths filtrados
+                    var usedModeIndices = new HashSet<uint>();
+                    foreach (var path in filteredPaths)
+                    {
+                        if (path.SourceModeInfoIdx != 0xffffffff) // DISPLAYCONFIG_PATH_MODE_IDX_INVALID
+                            usedModeIndices.Add(path.SourceModeInfoIdx);
+                        if (path.TargetModeInfoIdx != 0xffffffff)
+                            usedModeIndices.Add(path.TargetModeInfoIdx);
+                    }
+
+                    // Filtrar CcdModes para mantener solo los usados
+                    var filteredModes = new List<CcdModeInfo>();
+                    var oldToNewModeIndex = new Dictionary<uint, uint>();
+                    uint newIndex = 0;
+
+                    for (uint i = 0; i < _profile.CcdModes.Count; i++)
+                    {
+                        if (usedModeIndices.Contains(i))
+                        {
+                            filteredModes.Add(_profile.CcdModes[(int)i]);
+                            oldToNewModeIndex[i] = newIndex;
+                            newIndex++;
+                        }
+                    }
+
+                    // Actualizar índices de modos en los paths
+                    foreach (var path in filteredPaths)
+                    {
+                        if (path.SourceModeInfoIdx != 0xffffffff && oldToNewModeIndex.ContainsKey(path.SourceModeInfoIdx))
+                            path.SourceModeInfoIdx = oldToNewModeIndex[path.SourceModeInfoIdx];
+                        if (path.TargetModeInfoIdx != 0xffffffff && oldToNewModeIndex.ContainsKey(path.TargetModeInfoIdx))
+                            path.TargetModeInfoIdx = oldToNewModeIndex[path.TargetModeInfoIdx];
+                    }
+
+                    logger.Debug($"Filtrado CCD: {_profile.CcdPaths.Count} paths -> {filteredPaths.Count} paths, {_profile.CcdModes.Count} modes -> {filteredModes.Count} modes");
+
+                    _profile.CcdPaths.Clear();
+                    _profile.CcdPaths.AddRange(filteredPaths);
+                    _profile.CcdModes.Clear();
+                    _profile.CcdModes.AddRange(filteredModes);
                 }
 
                 // Save audio settings

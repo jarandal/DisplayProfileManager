@@ -488,6 +488,59 @@ namespace DisplayProfileManager.Core
 
                     ProfileApplyResult result = new ProfileApplyResult { AudioSuccess = true };
 
+                    // Validar y limpiar datos CCD corruptos antes de aplicar
+                    if (profile.CcdPaths.Count > 20 || profile.DisplaySettings.Count == 0)
+                    {
+                        logger.Warn($"Perfil '{profile.Name}' tiene datos CCD posiblemente corruptos ({profile.CcdPaths.Count} paths). Filtrando...");
+
+                        // Obtener TargetIds de los monitores en DisplaySettings
+                        var targetIdsInProfile = new HashSet<uint>(profile.DisplaySettings.Select(s => s.TargetId));
+
+                        // Filtrar paths para mantener solo los que están en DisplaySettings
+                        var filteredPaths = profile.CcdPaths.Where(p => targetIdsInProfile.Contains(p.TargetId)).ToList();
+
+                        // Obtener índices de modos usados
+                        var usedModeIndices = new HashSet<uint>();
+                        foreach (var path in filteredPaths)
+                        {
+                            if (path.SourceModeInfoIdx != 0xffffffff)
+                                usedModeIndices.Add(path.SourceModeInfoIdx);
+                            if (path.TargetModeInfoIdx != 0xffffffff)
+                                usedModeIndices.Add(path.TargetModeInfoIdx);
+                        }
+
+                        // Filtrar modes
+                        var filteredModes = new List<CcdModeInfo>();
+                        var oldToNewModeIndex = new Dictionary<uint, uint>();
+                        uint newIndex = 0;
+
+                        for (uint i = 0; i < profile.CcdModes.Count; i++)
+                        {
+                            if (usedModeIndices.Contains(i))
+                            {
+                                filteredModes.Add(profile.CcdModes[(int)i]);
+                                oldToNewModeIndex[i] = newIndex;
+                                newIndex++;
+                            }
+                        }
+
+                        // Actualizar índices en paths
+                        foreach (var path in filteredPaths)
+                        {
+                            if (path.SourceModeInfoIdx != 0xffffffff && oldToNewModeIndex.ContainsKey(path.SourceModeInfoIdx))
+                                path.SourceModeInfoIdx = oldToNewModeIndex[path.SourceModeInfoIdx];
+                            if (path.TargetModeInfoIdx != 0xffffffff && oldToNewModeIndex.ContainsKey(path.TargetModeInfoIdx))
+                                path.TargetModeInfoIdx = oldToNewModeIndex[path.TargetModeInfoIdx];
+                        }
+
+                        logger.Info($"Filtrado CCD: {profile.CcdPaths.Count} paths -> {filteredPaths.Count} paths, {profile.CcdModes.Count} modes -> {filteredModes.Count} modes");
+
+                        profile.CcdPaths.Clear();
+                        profile.CcdPaths.AddRange(filteredPaths);
+                        profile.CcdModes.Clear();
+                        profile.CcdModes.AddRange(filteredModes);
+                    }
+
                     // Paso 1: Obtener configuración CCD actual del sistema
                     if (!DisplayConfigHelper.GetCcdData(out var currentPaths, out var currentModes))
                     {
