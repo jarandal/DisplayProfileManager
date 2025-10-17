@@ -1283,9 +1283,9 @@ namespace DisplayProfileManager.Helpers
                 uint pathCount = 0;
                 uint modeCount = 0;
 
-                // Obtener tamaños de buffer para paths activos
+                // Obtener tamaños de buffer para TODOS los paths (activos e inactivos)
                 int result = GetDisplayConfigBufferSizes(
-                    QueryDisplayConfigFlags.QDC_ONLY_ACTIVE_PATHS,
+                    QueryDisplayConfigFlags.QDC_ALL_PATHS,
                     out pathCount,
                     out modeCount);
 
@@ -1298,9 +1298,9 @@ namespace DisplayProfileManager.Helpers
                 paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
                 modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
 
-                // Consultar configuración de display activa
+                // Consultar configuración de display (todos los paths)
                 result = QueryDisplayConfig(
-                    QueryDisplayConfigFlags.QDC_ONLY_ACTIVE_PATHS,
+                    QueryDisplayConfigFlags.QDC_ALL_PATHS,
                     ref pathCount,
                     paths,
                     ref modeCount,

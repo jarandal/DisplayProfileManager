@@ -701,8 +701,10 @@ namespace DisplayProfileManager.Core
                     {
                         logger.Info("Usando aplicación escalonada (staged) para evitar problemas de ancho de banda...");
 
-                        // Identificar monitores actualmente activos
-                        var currentlyActiveTargetIds = new HashSet<uint>(currentPaths.Select(p => p.targetInfo.id));
+                        // Identificar monitores actualmente activos (solo los que tienen el flag ACTIVE)
+                        var currentlyActiveTargetIds = new HashSet<uint>(
+                            currentPaths.Where(p => (p.flags & (uint)DisplayConfigHelper.DisplayConfigPathInfoFlags.DISPLAYCONFIG_PATH_ACTIVE) != 0)
+                                       .Select(p => p.targetInfo.id));
                         logger.Debug($"Monitores actualmente activos: {string.Join(", ", currentlyActiveTargetIds)}");
 
                         // Fase 1: Aplicar configuración solo para monitores que ya están activos
