@@ -238,20 +238,30 @@ namespace DisplayProfileManager.UI.Windows
                 _profile.Name = ProfileNameTextBox.Text.Trim();
                 _profile.Description = ProfileDescriptionTextBox.Text.Trim();
 
-                // Capturar configuración CCD completa + DisplaySettings
-                logger.Info($"Capturando configuración CCD para perfil '{_profile.Name}'");
-                bool captureSuccess = await _profileManager.CaptureCurrentConfigurationAsync(_profile);
+                // Solo capturar configuración CCD si es un perfil nuevo o si no tiene datos CCD
+                // Si ya tiene datos CCD, solo actualizamos los DisplaySettings desde la GUI
+                bool needsCcdCapture = (_profile.CcdPaths == null || _profile.CcdPaths.Count == 0);
 
-                if (!captureSuccess)
+                if (needsCcdCapture)
                 {
-                    StatusTextBlock.Text = "Failed to capture display configuration";
-                    MessageBox.Show("Failed to capture current display configuration. Please try again.", "Error",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                    SaveButton.IsEnabled = true;
-                    return;
+                    logger.Info($"Capturando configuración CCD para perfil nuevo '{_profile.Name}'");
+                    bool captureSuccess = await _profileManager.CaptureCurrentConfigurationAsync(_profile);
+
+                    if (!captureSuccess)
+                    {
+                        StatusTextBlock.Text = "Failed to capture display configuration";
+                        MessageBox.Show("Failed to capture current display configuration. Please try again.", "Error",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                        SaveButton.IsEnabled = true;
+                        return;
+                    }
+                }
+                else
+                {
+                    logger.Info($"Perfil existente '{_profile.Name}' - actualizando solo DisplaySettings desde GUI");
                 }
 
-                // Actualizar DisplaySettings desde los controles UI (para override manual si es necesario)
+                // Actualizar DisplaySettings desde los controles UI
                 _profile.DisplaySettings.Clear();
                 foreach (var control in _displayControls)
                 {

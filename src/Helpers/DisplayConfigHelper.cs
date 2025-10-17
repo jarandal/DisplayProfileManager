@@ -612,6 +612,10 @@ namespace DisplayProfileManager.Helpers
                             displayConfig.DisplayPositionX = sourceMode.modeInfo.sourceMode.position.x;
                             displayConfig.DisplayPositionY = sourceMode.modeInfo.sourceMode.position.y;
                             displayConfig.Rotation = (DISPLAYCONFIG_ROTATION)path.targetInfo.rotation;
+
+                            // El monitor primario en Windows es el que tiene posición (0,0)
+                            displayConfig.IsPrimary = (sourceMode.modeInfo.sourceMode.position.x == 0 &&
+                                                      sourceMode.modeInfo.sourceMode.position.y == 0);
                         }
                     }
 

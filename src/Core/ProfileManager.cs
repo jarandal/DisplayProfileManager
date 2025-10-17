@@ -406,7 +406,7 @@ namespace DisplayProfileManager.Core
                 var exactMatch = systemDisplays.FirstOrDefault(d => d.PhysicalConnectionId == profileSetting.PhysicalConnectionId);
                 if (exactMatch != null)
                 {
-                    logger.Info($"✓ Nivel 1 - Coincidencia de conexión exacta: {exactMatch.FriendlyName} via {exactMatch.ConnectionType}");
+                    logger.Debug($"✓ Nivel 1 - Coincidencia de conexión exacta: {exactMatch.FriendlyName} via {exactMatch.ConnectionType}");
                     return exactMatch;
                 }
             }
@@ -426,7 +426,7 @@ namespace DisplayProfileManager.Core
                     .OrderByDescending(d => d.IsEnabled ? 1 : 0)
                     .ThenByDescending(d => d.ConnectionType == profileSetting.ConnectionType ? 1 : 0)
                     .First();
-                logger.Info($"✓ Nivel 2 - Coincidencia EDID: {bestEdidMatch.FriendlyName} via {bestEdidMatch.ConnectionType}");
+                logger.Debug($"✓ Nivel 2 - Coincidencia EDID: {bestEdidMatch.FriendlyName} via {bestEdidMatch.ConnectionType}");
                 return bestEdidMatch;
             }
 
@@ -437,7 +437,7 @@ namespace DisplayProfileManager.Core
             );
             if (nameAdapterMatch != null)
             {
-                logger.Info($"✓ Nivel 3 - Coincidencia por Nombre+Adaptador: {nameAdapterMatch.FriendlyName}");
+                logger.Debug($"✓ Nivel 3 - Coincidencia por Nombre+Adaptador: {nameAdapterMatch.FriendlyName}");
                 return nameAdapterMatch;
             }
 
@@ -636,7 +636,7 @@ namespace DisplayProfileManager.Core
                                 matched = true;
                                 matchedCount++;
                                 usedCurrentPaths.Add(j);
-                                logger.Info($"✓ Match exacto: SourceId={profilePath.sourceInfo.id}, TargetId={profilePath.targetInfo.id}");
+                                logger.Debug($"✓ Match exacto: SourceId={profilePath.sourceInfo.id}, TargetId={profilePath.targetInfo.id}");
                                 break;
                             }
                         }
@@ -654,7 +654,7 @@ namespace DisplayProfileManager.Core
                                 if (currentPath.targetInfo.id == profilePath.targetInfo.id)
                                 {
                                     // Match por targetId encontrado - actualizar sourceId al del sistema actual
-                                    logger.Info($"✓ Match por TargetId: Perfil quería SourceId={profilePath.sourceInfo.id}, usando SourceId={currentPath.sourceInfo.id} (TargetId={profilePath.targetInfo.id})");
+                                    logger.Debug($"✓ Match por TargetId: Perfil quería SourceId={profilePath.sourceInfo.id}, usando SourceId={currentPath.sourceInfo.id} (TargetId={profilePath.targetInfo.id})");
 
                                     profilePaths[i].sourceInfo.id = currentPath.sourceInfo.id;
                                     profilePaths[i].sourceInfo.adapterId = currentPath.sourceInfo.adapterId;
@@ -681,7 +681,7 @@ namespace DisplayProfileManager.Core
 
                         if (!matched)
                         {
-                            logger.Warn($"✗ No match: SourceId={profilePath.sourceInfo.id}, TargetId={profilePath.targetInfo.id} (monitor might be disconnected)");
+                            logger.Debug($"✗ No match: SourceId={profilePath.sourceInfo.id}, TargetId={profilePath.targetInfo.id} (monitor might be disconnected)");
                         }
                     }
 
