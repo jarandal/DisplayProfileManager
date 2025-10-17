@@ -157,8 +157,7 @@ namespace DisplayProfileManager.Core
 
             try
             {
-                var currentSettings = await GetCurrentDisplaySettingsAsync();
-                defaultProfile.DisplaySettings.AddRange(currentSettings);
+                await CaptureCurrentConfigurationAsync(defaultProfile);
 
                 AddProfile(defaultProfile);
                 _currentProfileId = defaultProfile.Id;
@@ -174,107 +173,221 @@ namespace DisplayProfileManager.Core
             }
         }
 
+        /// <summary>
+        /// Captura la configuración CCD completa y DisplaySettings del sistema actual - estilo MonitorSwitcherGUI
+        /// </summary>
+        public async Task<bool> CaptureCurrentConfigurationAsync(Profile profile)
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    logger.Info("Capturando configuración CCD completa del sistema...");
+
+                    // Paso 1: Obtener estructuras CCD completas (paths y modes)
+                    if (!DisplayConfigHelper.GetCcdData(out var paths, out var modes))
+                    {
+                        logger.Error("No se pudo obtener datos CCD");
+                        return false;
+                    }
+
+                    // Paso 2: Convertir DISPLAYCONFIG_PATH_INFO a CcdPathInfo
+                    profile.CcdPaths.Clear();
+                    foreach (var path in paths)
+                    {
+                        var ccdPath = new CcdPathInfo
+                        {
+                            SourceAdapterId = DisplayConfigHelper.LuidToString(path.sourceInfo.adapterId),
+                            SourceId = path.sourceInfo.id,
+                            SourceModeInfoIdx = path.sourceInfo.modeInfoIdx,
+                            SourceStatusFlags = path.sourceInfo.statusFlags,
+                            TargetAdapterId = DisplayConfigHelper.LuidToString(path.targetInfo.adapterId),
+                            TargetId = path.targetInfo.id,
+                            TargetModeInfoIdx = path.targetInfo.modeInfoIdx,
+                            OutputTechnology = (uint)path.targetInfo.outputTechnology,
+                            Rotation = path.targetInfo.rotation,
+                            Scaling = path.targetInfo.scaling,
+                            RefreshRateNumerator = path.targetInfo.refreshRate.Numerator,
+                            RefreshRateDenominator = path.targetInfo.refreshRate.Denominator,
+                            ScanLineOrdering = path.targetInfo.scanLineOrdering,
+                            TargetAvailable = path.targetInfo.targetAvailable,
+                            TargetStatusFlags = path.targetInfo.statusFlags,
+                            Flags = path.flags
+                        };
+                        profile.CcdPaths.Add(ccdPath);
+                        logger.Debug($"CCD Path: SourceId={ccdPath.SourceId}, TargetId={ccdPath.TargetId}");
+                    }
+
+                    // Paso 3: Convertir DISPLAYCONFIG_MODE_INFO a CcdModeInfo
+                    profile.CcdModes.Clear();
+                    foreach (var mode in modes)
+                    {
+                        var ccdMode = new CcdModeInfo
+                        {
+                            InfoType = (uint)mode.infoType,
+                            Id = mode.id,
+                            AdapterId = DisplayConfigHelper.LuidToString(mode.adapterId)
+                        };
+
+                        // Distinguir entre Source y Target mode
+                        if (mode.infoType == DisplayConfigHelper.DisplayConfigModeInfoType.DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE)
+                        {
+                            ccdMode.SourceWidth = mode.modeInfo.sourceMode.width;
+                            ccdMode.SourceHeight = mode.modeInfo.sourceMode.height;
+                            ccdMode.SourcePixelFormat = mode.modeInfo.sourceMode.pixelFormat;
+                            ccdMode.SourcePositionX = mode.modeInfo.sourceMode.position.x;
+                            ccdMode.SourcePositionY = mode.modeInfo.sourceMode.position.y;
+                            logger.Debug($"CCD Mode (Source): Id={ccdMode.Id}, {ccdMode.SourceWidth}x{ccdMode.SourceHeight}");
+                        }
+                        else if (mode.infoType == DisplayConfigHelper.DisplayConfigModeInfoType.DISPLAYCONFIG_MODE_INFO_TYPE_TARGET)
+                        {
+                            ccdMode.TargetPixelRate = (long)mode.modeInfo.targetMode.targetVideoSignalInfo.pixelRate;
+                            ccdMode.TargetHSyncNumerator = mode.modeInfo.targetMode.targetVideoSignalInfo.hSyncFreq.Numerator;
+                            ccdMode.TargetHSyncDenominator = mode.modeInfo.targetMode.targetVideoSignalInfo.hSyncFreq.Denominator;
+                            ccdMode.TargetVSyncNumerator = mode.modeInfo.targetMode.targetVideoSignalInfo.vSyncFreq.Numerator;
+                            ccdMode.TargetVSyncDenominator = mode.modeInfo.targetMode.targetVideoSignalInfo.vSyncFreq.Denominator;
+                            ccdMode.TargetActiveWidth = mode.modeInfo.targetMode.targetVideoSignalInfo.activeSize.cx;
+                            ccdMode.TargetActiveHeight = mode.modeInfo.targetMode.targetVideoSignalInfo.activeSize.cy;
+                            ccdMode.TargetTotalWidth = mode.modeInfo.targetMode.targetVideoSignalInfo.totalSize.cx;
+                            ccdMode.TargetTotalHeight = mode.modeInfo.targetMode.targetVideoSignalInfo.totalSize.cy;
+                            ccdMode.TargetVideoStandard = mode.modeInfo.targetMode.targetVideoSignalInfo.videoStandard;
+                            ccdMode.TargetScanLineOrdering = mode.modeInfo.targetMode.targetVideoSignalInfo.scanLineOrdering;
+                            logger.Debug($"CCD Mode (Target): Id={ccdMode.Id}, Active={ccdMode.TargetActiveWidth}x{ccdMode.TargetActiveHeight}");
+                        }
+
+                        profile.CcdModes.Add(ccdMode);
+                    }
+
+                    // Paso 4: Capturar información adicional de monitores (EDID, nombres)
+                    profile.MonitorInfo.Clear();
+                    foreach (var path in paths)
+                    {
+                        var targetName = new DisplayConfigHelper.DISPLAYCONFIG_TARGET_DEVICE_NAME();
+                        targetName.header.type = DisplayConfigHelper.DisplayConfigDeviceInfoType.DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+                        targetName.header.size = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(DisplayConfigHelper.DISPLAYCONFIG_TARGET_DEVICE_NAME));
+                        targetName.header.adapterId = path.targetInfo.adapterId;
+                        targetName.header.id = path.targetInfo.id;
+
+                        int result = DisplayConfigHelper.DisplayConfigGetDeviceInfo(ref targetName);
+                        if (result == 0) // ERROR_SUCCESS
+                        {
+                            var monitorInfo = new MonitorAdditionalInfo
+                            {
+                                MonitorFriendlyDevice = targetName.monitorFriendlyDeviceName,
+                                MonitorDevicePath = targetName.monitorDevicePath,
+                                EdidManufactureId = targetName.edidManufactureId,
+                                EdidProductCodeId = targetName.edidProductCodeId
+                            };
+                            profile.MonitorInfo.Add(monitorInfo);
+                            logger.Debug($"Monitor Info: {monitorInfo.MonitorFriendlyDevice} (EDID: {monitorInfo.EdidManufactureId:X4}/{monitorInfo.EdidProductCodeId:X4})");
+                        }
+                    }
+
+                    // Paso 5: Capturar DisplaySettings (para UI, HDR, DPI)
+                    var displaySettings = GetCurrentDisplaySettingsSync();
+                    profile.DisplaySettings.Clear();
+                    profile.DisplaySettings.AddRange(displaySettings);
+
+                    logger.Info($"Configuración CCD capturada: {profile.CcdPaths.Count} paths, {profile.CcdModes.Count} modes, {profile.MonitorInfo.Count} monitores, {profile.DisplaySettings.Count} display settings");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    logger.Error(ex, "Error capturando configuración CCD");
+                    return false;
+                }
+            });
+        }
+
+        /// <summary>
+        /// Versión sincrónica de GetCurrentDisplaySettingsAsync para uso interno
+        /// </summary>
+        private List<DisplaySetting> GetCurrentDisplaySettingsSync()
+        {
+            var settings = new List<DisplaySetting>();
+            try
+            {
+                logger.Debug("Getting current display settings using unified DisplayConfigHelper...");
+
+                List<DisplayConfigHelper.DisplayConfigInfo> displayConfigs = DisplayConfigHelper.GetDisplayConfigs();
+                var activeConfigs = displayConfigs.Where(d => d.IsEnabled).ToList();
+
+                foreach (var config in activeConfigs)
+                {
+                    DpiHelper.DPIScalingInfo dpiInfo = DpiHelper.GetDPIScalingInfo(config.DeviceName);
+
+                    DisplaySetting setting = new DisplaySetting
+                    {
+                        DeviceName = config.DeviceName,
+                        ReadableDeviceName = config.FriendlyName,
+                        Width = config.Width,
+                        Height = config.Height,
+                        Frequency = (int)config.RefreshRate,
+                        DpiScaling = dpiInfo.Current,
+                        IsPrimary = config.IsPrimary,
+                        AdapterId = $"{config.AdapterId.HighPart:X8}{config.AdapterId.LowPart:X8}",
+                        SourceId = config.SourceId,
+                        IsEnabled = config.IsEnabled,
+                        PathIndex = config.PathIndex,
+                        TargetId = config.TargetId,
+                        DisplayPositionX = config.DisplayPositionX,
+                        DisplayPositionY = config.DisplayPositionY,
+                        IsHdrSupported = config.IsHdrSupported,
+                        IsHdrEnabled = config.IsHdrEnabled,
+                        Rotation = (int)config.Rotation,
+                        PhysicalConnectionId = config.PhysicalConnectionId,
+                        ConnectionType = config.ConnectionType,
+                        ConnectorInstance = config.ConnectorInstance,
+                        ManufacturerName = config.ManufacturerName,
+                        ProductCodeID = config.ProductCodeID,
+                        SerialNumberID = config.SerialNumberID
+                    };
+
+                    // Capturar opciones disponibles
+                    try
+                    {
+                        setting.AvailableResolutions = DisplayHelper.GetSupportedResolutionsOnly(setting.DeviceName);
+                        var dpiValues = DpiHelper.GetSupportedDPIScalingOnly(setting.DeviceName);
+                        setting.AvailableDpiScaling = dpiValues.ToList();
+                        setting.AvailableRefreshRates = new Dictionary<string, List<int>>();
+                        foreach (var resolution in setting.AvailableResolutions)
+                        {
+                            var parts = resolution.Split('x');
+                            if (parts.Length == 2 &&
+                                int.TryParse(parts[0], out int width) &&
+                                int.TryParse(parts[1], out int height))
+                            {
+                                var refreshRates = DisplayHelper.GetAvailableRefreshRates(setting.DeviceName, width, height);
+                                if (refreshRates.Count > 0)
+                                {
+                                    setting.AvailableRefreshRates[resolution] = refreshRates;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Error(ex, $"Error capturing available options for {setting.DeviceName}");
+                    }
+
+                    settings.Add(setting);
+                }
+
+                logger.Info($"Found {settings.Count} display settings");
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "Error getting current display settings");
+            }
+
+            return settings;
+        }
+
         public async Task<List<DisplaySetting>> GetCurrentDisplaySettingsAsync()
         {
             return await Task.Run(() =>
             {
-                var settings = new List<DisplaySetting>();
-                try
-                {
-                    logger.Debug("Getting current display settings using unified DisplayConfigHelper...");
-
-                    List<DisplayConfigHelper.DisplayConfigInfo> displayConfigs = DisplayConfigHelper.GetDisplayConfigs();
-                    var activeConfigs = displayConfigs.Where(d => d.IsEnabled).ToList();
-
-                    foreach (var config in activeConfigs)
-                    {
-                        DpiHelper.DPIScalingInfo dpiInfo = DpiHelper.GetDPIScalingInfo(config.DeviceName);
-
-                        DisplaySetting setting = new DisplaySetting
-                        {
-                            DeviceName = config.DeviceName,
-                            ReadableDeviceName = config.FriendlyName,
-                            Width = config.Width,
-                            Height = config.Height,
-                            Frequency = (int)config.RefreshRate,
-                            DpiScaling = dpiInfo.Current,
-                            IsPrimary = config.IsPrimary,
-                            AdapterId = $"{config.AdapterId.HighPart:X8}{config.AdapterId.LowPart:X8}",
-                            SourceId = config.SourceId,
-                            IsEnabled = config.IsEnabled,
-                            PathIndex = config.PathIndex,
-                            TargetId = config.TargetId,
-                            DisplayPositionX = config.DisplayPositionX,
-                            DisplayPositionY = config.DisplayPositionY,
-                            IsHdrSupported = config.IsHdrSupported,
-                            IsHdrEnabled = config.IsHdrEnabled,
-                            Rotation = (int)config.Rotation,
-
-                            // NUEVO: Guardar identificadores de conexión física
-                            PhysicalConnectionId = config.PhysicalConnectionId,
-                            ConnectionType = config.ConnectionType,
-                            ConnectorInstance = config.ConnectorInstance,
-
-                            // Identificadores EDID
-                            ManufacturerName = config.ManufacturerName,
-                            ProductCodeID = config.ProductCodeID,
-                            SerialNumberID = config.SerialNumberID
-                        };
-
-                        logger.Debug($"PROFILE DEBUG: Creating DisplaySetting for {setting.DeviceName}:");
-                        logger.Debug($"PROFILE DEBUG:   HDR Supported: {setting.IsHdrSupported}");
-                        logger.Debug($"PROFILE DEBUG:   HDR Enabled: {setting.IsHdrEnabled}");
-                        logger.Debug($"PROFILE DEBUG:   PhysicalConnectionId: {setting.PhysicalConnectionId}");
-                        logger.Debug($"PROFILE DEBUG:   ConnectionType: {setting.ConnectionType}");
-
-                        // Capture available options for this monitor
-                        try
-                        {
-                            // Get available resolutions
-                            setting.AvailableResolutions = DisplayHelper.GetSupportedResolutionsOnly(setting.DeviceName);
-
-                            // Get available DPI scaling
-                            var dpiValues = DpiHelper.GetSupportedDPIScalingOnly(setting.DeviceName);
-                            setting.AvailableDpiScaling = dpiValues.ToList();
-
-                            // Get available refresh rates for each resolution
-                            setting.AvailableRefreshRates = new Dictionary<string, List<int>>();
-                            foreach (var resolution in setting.AvailableResolutions)
-                            {
-                                var parts = resolution.Split('x');
-                                if (parts.Length == 2 &&
-                                    int.TryParse(parts[0], out int width) &&
-                                    int.TryParse(parts[1], out int height))
-                                {
-                                    var refreshRates = DisplayHelper.GetAvailableRefreshRates(setting.DeviceName, width, height);
-                                    if (refreshRates.Count > 0)
-                                    {
-                                        setting.AvailableRefreshRates[resolution] = refreshRates;
-                                    }
-                                }
-                            }
-
-                            logger.Debug($"Captured available options for {setting.DeviceName}: " +
-                                $"{setting.AvailableResolutions.Count} resolutions, " +
-                                $"{setting.AvailableDpiScaling.Count} DPI values, " +
-                                $"{setting.AvailableRefreshRates.Count} resolution-refresh rate mappings");
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.Error(ex, $"Error capturing available options for {setting.DeviceName}");
-                        }
-
-                        settings.Add(setting);
-                    }
-
-                    logger.Info($"Found {settings.Count} display settings");
-                }
-                catch (Exception ex)
-                {
-                    logger.Error(ex, "Error getting current display settings");
-                }
-
-                return settings;
+                return GetCurrentDisplaySettingsSync();
             });
         }
 
@@ -341,6 +454,446 @@ namespace DisplayProfileManager.Core
         }
 
         public async Task<ProfileApplyResult> ApplyProfileAsync(Profile profile)
+        {
+            try
+            {
+                // Si el perfil tiene datos CCD, usar el nuevo método basado en MonitorSwitcherGUI
+                if (profile.CcdPaths != null && profile.CcdPaths.Count > 0)
+                {
+                    logger.Info("Perfil contiene datos CCD, usando método MonitorSwitcherGUI");
+                    return await ApplyProfileCcdAsync(profile);
+                }
+
+                // Fallback al método antiguo si no hay datos CCD
+                logger.Info("Perfil no contiene datos CCD, usando método legacy");
+                return await ApplyProfileLegacyAsync(profile);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "Error applying profile");
+                return new ProfileApplyResult { Success = false };
+            }
+        }
+
+        /// <summary>
+        /// Aplica un perfil usando estructuras CCD completas - estilo MonitorSwitcherGUI
+        /// </summary>
+        private async Task<ProfileApplyResult> ApplyProfileCcdAsync(Profile profile)
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    logger.Info($"Aplicando perfil CCD '{profile.Name}'...");
+
+                    ProfileApplyResult result = new ProfileApplyResult { AudioSuccess = true };
+
+                    // Paso 1: Obtener configuración CCD actual del sistema
+                    if (!DisplayConfigHelper.GetCcdData(out var currentPaths, out var currentModes))
+                    {
+                        logger.Error("No se pudo obtener configuración CCD actual");
+                        return new ProfileApplyResult { Success = false };
+                    }
+
+                    // Paso 2: Convertir CcdPathInfo/CcdModeInfo del perfil a estructuras nativas
+                    var profilePaths = new DisplayConfigHelper.DISPLAYCONFIG_PATH_INFO[profile.CcdPaths.Count];
+                    var profileModes = new DisplayConfigHelper.DISPLAYCONFIG_MODE_INFO[profile.CcdModes.Count];
+
+                    // Convertir paths
+                    for (int i = 0; i < profile.CcdPaths.Count; i++)
+                    {
+                        var ccdPath = profile.CcdPaths[i];
+                        profilePaths[i] = new DisplayConfigHelper.DISPLAYCONFIG_PATH_INFO
+                        {
+                            sourceInfo = new DisplayConfigHelper.DISPLAYCONFIG_PATH_SOURCE_INFO
+                            {
+                                adapterId = DisplayConfigHelper.GetLUIDFromString(ccdPath.SourceAdapterId),
+                                id = ccdPath.SourceId,
+                                modeInfoIdx = ccdPath.SourceModeInfoIdx,
+                                statusFlags = ccdPath.SourceStatusFlags
+                            },
+                            targetInfo = new DisplayConfigHelper.DISPLAYCONFIG_PATH_TARGET_INFO
+                            {
+                                adapterId = DisplayConfigHelper.GetLUIDFromString(ccdPath.TargetAdapterId),
+                                id = ccdPath.TargetId,
+                                modeInfoIdx = ccdPath.TargetModeInfoIdx,
+                                outputTechnology = (DisplayConfigHelper.DisplayConfigVideoOutputTechnology)ccdPath.OutputTechnology,
+                                rotation = ccdPath.Rotation,
+                                scaling = ccdPath.Scaling,
+                                refreshRate = new DisplayConfigHelper.DISPLAYCONFIG_RATIONAL
+                                {
+                                    Numerator = ccdPath.RefreshRateNumerator,
+                                    Denominator = ccdPath.RefreshRateDenominator
+                                },
+                                scanLineOrdering = ccdPath.ScanLineOrdering,
+                                targetAvailable = ccdPath.TargetAvailable,
+                                statusFlags = ccdPath.TargetStatusFlags
+                            },
+                            flags = ccdPath.Flags
+                        };
+                    }
+
+                    // Convertir modes
+                    for (int i = 0; i < profile.CcdModes.Count; i++)
+                    {
+                        var ccdMode = profile.CcdModes[i];
+                        profileModes[i] = new DisplayConfigHelper.DISPLAYCONFIG_MODE_INFO
+                        {
+                            infoType = (DisplayConfigHelper.DisplayConfigModeInfoType)ccdMode.InfoType,
+                            id = ccdMode.Id,
+                            adapterId = DisplayConfigHelper.GetLUIDFromString(ccdMode.AdapterId)
+                        };
+
+                        if (ccdMode.InfoType == 1) // Source
+                        {
+                            profileModes[i].modeInfo = new DisplayConfigHelper.DISPLAYCONFIG_MODE_INFO_UNION
+                            {
+                                sourceMode = new DisplayConfigHelper.DISPLAYCONFIG_SOURCE_MODE
+                                {
+                                    width = ccdMode.SourceWidth,
+                                    height = ccdMode.SourceHeight,
+                                    pixelFormat = ccdMode.SourcePixelFormat,
+                                    position = new DisplayConfigHelper.POINTL
+                                    {
+                                        x = ccdMode.SourcePositionX,
+                                        y = ccdMode.SourcePositionY
+                                    }
+                                }
+                            };
+                        }
+                        else if (ccdMode.InfoType == 2) // Target
+                        {
+                            profileModes[i].modeInfo = new DisplayConfigHelper.DISPLAYCONFIG_MODE_INFO_UNION
+                            {
+                                targetMode = new DisplayConfigHelper.DISPLAYCONFIG_TARGET_MODE
+                                {
+                                    targetVideoSignalInfo = new DisplayConfigHelper.DISPLAYCONFIG_VIDEO_SIGNAL_INFO
+                                    {
+                                        pixelRate = (ulong)ccdMode.TargetPixelRate,
+                                        hSyncFreq = new DisplayConfigHelper.DISPLAYCONFIG_RATIONAL
+                                        {
+                                            Numerator = ccdMode.TargetHSyncNumerator,
+                                            Denominator = ccdMode.TargetHSyncDenominator
+                                        },
+                                        vSyncFreq = new DisplayConfigHelper.DISPLAYCONFIG_RATIONAL
+                                        {
+                                            Numerator = ccdMode.TargetVSyncNumerator,
+                                            Denominator = ccdMode.TargetVSyncDenominator
+                                        },
+                                        activeSize = new DisplayConfigHelper.DISPLAYCONFIG_2DREGION
+                                        {
+                                            cx = ccdMode.TargetActiveWidth,
+                                            cy = ccdMode.TargetActiveHeight
+                                        },
+                                        totalSize = new DisplayConfigHelper.DISPLAYCONFIG_2DREGION
+                                        {
+                                            cx = ccdMode.TargetTotalWidth,
+                                            cy = ccdMode.TargetTotalHeight
+                                        },
+                                        videoStandard = ccdMode.TargetVideoStandard,
+                                        scanLineOrdering = ccdMode.TargetScanLineOrdering
+                                    }
+                                }
+                            };
+                        }
+                    }
+
+                    // Paso 3: Matching estilo MonitorSwitcherGUI - por sourceInfo.id + targetInfo.id, con fallback a solo targetInfo.id
+                    logger.Info("Emparejando monitores del perfil con monitores del sistema (MonitorSwitcherGUI style)...");
+                    int matchedCount = 0;
+                    var usedCurrentPaths = new HashSet<int>(); // Track which current paths we've already matched
+
+                    for (int i = 0; i < profilePaths.Length; i++)
+                    {
+                        var profilePath = profilePaths[i];
+                        bool matched = false;
+
+                        // Paso 3A: Buscar coincidencia exacta por sourceInfo.id + targetInfo.id (método ideal)
+                        for (int j = 0; j < currentPaths.Length; j++)
+                        {
+                            if (usedCurrentPaths.Contains(j))
+                                continue;
+
+                            var currentPath = currentPaths[j];
+
+                            if (currentPath.sourceInfo.id == profilePath.sourceInfo.id &&
+                                currentPath.targetInfo.id == profilePath.targetInfo.id)
+                            {
+                                // Match perfecto encontrado!
+                                profilePaths[i].sourceInfo.adapterId = currentPath.sourceInfo.adapterId;
+                                profilePaths[i].targetInfo.adapterId = currentPath.targetInfo.adapterId;
+
+                                // Actualizar adapter IDs en los modes correspondientes
+                                if (profilePath.sourceInfo.modeInfoIdx < profileModes.Length)
+                                {
+                                    profileModes[profilePath.sourceInfo.modeInfoIdx].adapterId = currentPath.sourceInfo.adapterId;
+                                }
+                                if (profilePath.targetInfo.modeInfoIdx < profileModes.Length)
+                                {
+                                    profileModes[profilePath.targetInfo.modeInfoIdx].adapterId = currentPath.targetInfo.adapterId;
+                                }
+
+                                matched = true;
+                                matchedCount++;
+                                usedCurrentPaths.Add(j);
+                                logger.Info($"✓ Match exacto: SourceId={profilePath.sourceInfo.id}, TargetId={profilePath.targetInfo.id}");
+                                break;
+                            }
+                        }
+
+                        // Paso 3B: Si no hay match exacto, buscar solo por targetInfo.id (el monitor físico es el mismo)
+                        if (!matched)
+                        {
+                            for (int j = 0; j < currentPaths.Length; j++)
+                            {
+                                if (usedCurrentPaths.Contains(j))
+                                    continue;
+
+                                var currentPath = currentPaths[j];
+
+                                if (currentPath.targetInfo.id == profilePath.targetInfo.id)
+                                {
+                                    // Match por targetId encontrado - actualizar sourceId al del sistema actual
+                                    logger.Info($"✓ Match por TargetId: Perfil quería SourceId={profilePath.sourceInfo.id}, usando SourceId={currentPath.sourceInfo.id} (TargetId={profilePath.targetInfo.id})");
+
+                                    profilePaths[i].sourceInfo.id = currentPath.sourceInfo.id;
+                                    profilePaths[i].sourceInfo.adapterId = currentPath.sourceInfo.adapterId;
+                                    profilePaths[i].targetInfo.adapterId = currentPath.targetInfo.adapterId;
+
+                                    // Actualizar adapter IDs en los modes correspondientes
+                                    if (profilePath.sourceInfo.modeInfoIdx < profileModes.Length)
+                                    {
+                                        profileModes[profilePath.sourceInfo.modeInfoIdx].id = currentPath.sourceInfo.id;
+                                        profileModes[profilePath.sourceInfo.modeInfoIdx].adapterId = currentPath.sourceInfo.adapterId;
+                                    }
+                                    if (profilePath.targetInfo.modeInfoIdx < profileModes.Length)
+                                    {
+                                        profileModes[profilePath.targetInfo.modeInfoIdx].adapterId = currentPath.targetInfo.adapterId;
+                                    }
+
+                                    matched = true;
+                                    matchedCount++;
+                                    usedCurrentPaths.Add(j);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!matched)
+                        {
+                            logger.Warn($"✗ No match: SourceId={profilePath.sourceInfo.id}, TargetId={profilePath.targetInfo.id} (monitor might be disconnected)");
+                        }
+                    }
+
+                    logger.Info($"Emparejamiento completado: {matchedCount}/{profilePaths.Length} monitores");
+
+                    if (matchedCount == 0)
+                    {
+                        logger.Error("No se pudo emparejar ningún monitor del perfil con el sistema actual");
+                        return new ProfileApplyResult { Success = false };
+                    }
+
+                    // Paso 4: Aplicar configuración CCD usando SetDisplayConfig
+                    // Verificar si debemos usar staged application
+                    bool useStagedApplication = _settingsManager.ShouldUseStagedApplication() && profilePaths.Length > 1;
+
+                    if (useStagedApplication)
+                    {
+                        logger.Info("Usando aplicación escalonada (staged) para evitar problemas de ancho de banda...");
+
+                        // Identificar monitores actualmente activos
+                        var currentlyActiveTargetIds = new HashSet<uint>(currentPaths.Select(p => p.targetInfo.id));
+                        logger.Debug($"Monitores actualmente activos: {string.Join(", ", currentlyActiveTargetIds)}");
+
+                        // Fase 1: Aplicar configuración solo para monitores que ya están activos
+                        var phase1PathIndices = new List<int>();
+                        for (int i = 0; i < profilePaths.Length; i++)
+                        {
+                            if (currentlyActiveTargetIds.Contains(profilePaths[i].targetInfo.id))
+                            {
+                                phase1PathIndices.Add(i);
+                            }
+                        }
+
+                        if (phase1PathIndices.Count > 0 && phase1PathIndices.Count < profilePaths.Length)
+                        {
+                            logger.Info($"Fase 1: Aplicando configuración para {phase1PathIndices.Count} monitor(es) activo(s)...");
+
+                            // Crear arrays temporales solo con los paths/modes de monitores activos
+                            var phase1Paths = phase1PathIndices.Select(i => profilePaths[i]).ToArray();
+
+                            // Necesitamos crear modes solo para los paths de fase 1
+                            var phase1ModesList = new List<DisplayConfigHelper.DISPLAYCONFIG_MODE_INFO>();
+                            var modeIndexMap = new Dictionary<uint, uint>(); // old index -> new index
+
+                            foreach (var path in phase1Paths)
+                            {
+                                // Agregar source mode si no está ya en la lista
+                                if (path.sourceInfo.modeInfoIdx < profileModes.Length)
+                                {
+                                    if (!modeIndexMap.ContainsKey(path.sourceInfo.modeInfoIdx))
+                                    {
+                                        modeIndexMap[path.sourceInfo.modeInfoIdx] = (uint)phase1ModesList.Count;
+                                        phase1ModesList.Add(profileModes[path.sourceInfo.modeInfoIdx]);
+                                    }
+                                }
+
+                                // Agregar target mode si no está ya en la lista
+                                if (path.targetInfo.modeInfoIdx < profileModes.Length)
+                                {
+                                    if (!modeIndexMap.ContainsKey(path.targetInfo.modeInfoIdx))
+                                    {
+                                        modeIndexMap[path.targetInfo.modeInfoIdx] = (uint)phase1ModesList.Count;
+                                        phase1ModesList.Add(profileModes[path.targetInfo.modeInfoIdx]);
+                                    }
+                                }
+                            }
+
+                            // Actualizar índices de modeInfo en phase1Paths
+                            for (int i = 0; i < phase1Paths.Length; i++)
+                            {
+                                if (modeIndexMap.ContainsKey(phase1Paths[i].sourceInfo.modeInfoIdx))
+                                {
+                                    phase1Paths[i].sourceInfo.modeInfoIdx = modeIndexMap[phase1Paths[i].sourceInfo.modeInfoIdx];
+                                }
+                                if (modeIndexMap.ContainsKey(phase1Paths[i].targetInfo.modeInfoIdx))
+                                {
+                                    phase1Paths[i].targetInfo.modeInfoIdx = modeIndexMap[phase1Paths[i].targetInfo.modeInfoIdx];
+                                }
+                            }
+
+                            var phase1Modes = phase1ModesList.ToArray();
+
+                            // Aplicar fase 1
+                            int phase1Result = DisplayConfigHelper.SetDisplayConfig(
+                                (uint)phase1Paths.Length,
+                                phase1Paths,
+                                (uint)phase1Modes.Length,
+                                phase1Modes,
+                                DisplayConfigHelper.SetDisplayConfigFlags.SDC_APPLY |
+                                DisplayConfigHelper.SetDisplayConfigFlags.SDC_USE_SUPPLIED_DISPLAY_CONFIG |
+                                DisplayConfigHelper.SetDisplayConfigFlags.SDC_ALLOW_CHANGES |
+                                DisplayConfigHelper.SetDisplayConfigFlags.SDC_SAVE_TO_DATABASE
+                            );
+
+                            if (phase1Result != 0)
+                            {
+                                logger.Warn($"Fase 1 falló con código {phase1Result}, continuando con aplicación completa...");
+                            }
+                            else
+                            {
+                                logger.Info("Fase 1 completada. Esperando estabilización...");
+                                int pauseMs = _settingsManager.GetStagedApplicationPauseMs();
+                                System.Threading.Thread.Sleep(pauseMs);
+                            }
+                        }
+                        else
+                        {
+                            logger.Info("No se requiere Fase 1 (todos los monitores son nuevos o todos ya están activos)");
+                        }
+
+                        // Fase 2: Aplicar configuración completa
+                        logger.Info("Fase 2: Aplicando configuración CCD completa...");
+                    }
+                    else
+                    {
+                        logger.Info("Aplicando configuración CCD directamente (sin staged application)...");
+                    }
+
+                    int setResult = DisplayConfigHelper.SetDisplayConfig(
+                        (uint)profilePaths.Length,
+                        profilePaths,
+                        (uint)profileModes.Length,
+                        profileModes,
+                        DisplayConfigHelper.SetDisplayConfigFlags.SDC_APPLY |
+                        DisplayConfigHelper.SetDisplayConfigFlags.SDC_USE_SUPPLIED_DISPLAY_CONFIG |
+                        DisplayConfigHelper.SetDisplayConfigFlags.SDC_ALLOW_CHANGES |
+                        DisplayConfigHelper.SetDisplayConfigFlags.SDC_SAVE_TO_DATABASE
+                    );
+
+                    if (setResult != 0) // ERROR_SUCCESS
+                    {
+                        logger.Error($"SetDisplayConfig falló con código de error: {setResult}");
+                        result.Success = false;
+                        result.DisplayConfigApplied = false;
+                        return result;
+                    }
+
+                    logger.Info("Configuración CCD aplicada exitosamente");
+                    result.DisplayConfigApplied = true;
+                    result.ResolutionChanged = true;
+                    result.PrimaryChanged = true;
+
+                    // Paso 5: Aplicar configuración de HDR y DPI desde DisplaySettings
+                    if (profile.DisplaySettings != null && profile.DisplaySettings.Count > 0)
+                    {
+                        logger.Info("Aplicando configuración de HDR y DPI...");
+
+                        var currentDisplayConfigs = DisplayConfigHelper.GetDisplayConfigs();
+                        bool allDpiChanged = true;
+
+                        foreach (var displaySetting in profile.DisplaySettings)
+                        {
+                            // Buscar el display actual correspondiente solo por TargetId (SourceId puede haber cambiado durante matching)
+                            var currentDisplay = currentDisplayConfigs.FirstOrDefault(d => d.TargetId == displaySetting.TargetId);
+
+                            if (currentDisplay != null)
+                            {
+                                logger.Debug($"Aplicando HDR/DPI para TargetId={displaySetting.TargetId} ({currentDisplay.FriendlyName}): HDR={displaySetting.IsHdrEnabled}, DPI={displaySetting.DpiScaling}");
+
+                                // Aplicar HDR
+                                if (displaySetting.IsHdrSupported)
+                                {
+                                    DisplayConfigHelper.SetHdrState(currentDisplay.AdapterId, currentDisplay.TargetId, displaySetting.IsHdrEnabled);
+                                    logger.Info($"HDR configurado a {displaySetting.IsHdrEnabled} para {currentDisplay.FriendlyName}");
+                                }
+
+                                // Aplicar DPI
+                                if (!DpiHelper.SetDPIScaling(currentDisplay.DeviceName, displaySetting.DpiScaling))
+                                {
+                                    logger.Warn($"Failed to set DPI scaling for {currentDisplay.DeviceName}");
+                                    allDpiChanged = false;
+                                }
+                            }
+                            else
+                            {
+                                logger.Warn($"No se encontró display actual para TargetId={displaySetting.TargetId}, saltando HDR/DPI");
+                            }
+                        }
+
+                        result.DpiChanged = allDpiChanged;
+                    }
+
+                    // Paso 6: Aplicar audio settings
+                    if (profile.AudioSettings != null)
+                    {
+                        result.AudioSuccess = AudioHelper.ApplyAudioSettings(profile.AudioSettings);
+                    }
+
+                    result.Success = result.DisplayConfigApplied;
+
+                    if (result.Success)
+                    {
+                        _currentProfileId = profile.Id;
+                        _settingsManager.SetCurrentProfileIdAsync(profile.Id).Wait();
+                        ProfileApplied?.Invoke(this, profile);
+                        logger.Info($"Perfil '{profile.Name}' aplicado exitosamente");
+                    }
+
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    logger.Error(ex, "Error aplicando perfil CCD");
+                    return new ProfileApplyResult { Success = false };
+                }
+            });
+        }
+
+        /// <summary>
+        /// Método legacy para aplicar perfiles sin datos CCD
+        /// </summary>
+        private async Task<ProfileApplyResult> ApplyProfileLegacyAsync(Profile profile)
         {
             try
             {

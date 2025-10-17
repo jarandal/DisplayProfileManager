@@ -1,0 +1,7 @@
+**/.vs/**
+**/.claude/**
+diff.txt
+third*.md
+packages/**
+logs_y_profiles.md  
+profiles.md

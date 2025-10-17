@@ -237,8 +237,22 @@ namespace DisplayProfileManager.UI.Windows
 
                 _profile.Name = ProfileNameTextBox.Text.Trim();
                 _profile.Description = ProfileDescriptionTextBox.Text.Trim();
-                _profile.DisplaySettings.Clear();
 
+                // Capturar configuración CCD completa + DisplaySettings
+                logger.Info($"Capturando configuración CCD para perfil '{_profile.Name}'");
+                bool captureSuccess = await _profileManager.CaptureCurrentConfigurationAsync(_profile);
+
+                if (!captureSuccess)
+                {
+                    StatusTextBlock.Text = "Failed to capture display configuration";
+                    MessageBox.Show("Failed to capture current display configuration. Please try again.", "Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    SaveButton.IsEnabled = true;
+                    return;
+                }
+
+                // Actualizar DisplaySettings desde los controles UI (para override manual si es necesario)
+                _profile.DisplaySettings.Clear();
                 foreach (var control in _displayControls)
                 {
                     var setting = control.GetDisplaySetting();

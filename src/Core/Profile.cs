@@ -25,6 +25,17 @@ namespace DisplayProfileManager.Core
         [JsonProperty("lastModifiedDate")]
         public DateTime LastModifiedDate { get; set; } = DateTime.Now;
 
+        // Datos CCD completos (estilo MonitorSwitcherGUI) - estos son los que se usan para aplicar el perfil
+        [JsonProperty("ccdPaths")]
+        public List<CcdPathInfo> CcdPaths { get; set; } = new List<CcdPathInfo>();
+
+        [JsonProperty("ccdModes")]
+        public List<CcdModeInfo> CcdModes { get; set; } = new List<CcdModeInfo>();
+
+        [JsonProperty("monitorInfo")]
+        public List<MonitorAdditionalInfo> MonitorInfo { get; set; } = new List<MonitorAdditionalInfo>();
+
+        // DisplaySettings se mantiene para compatibilidad con UI y para HDR/DPI
         [JsonProperty("displaySettings")]
         public List<DisplaySetting> DisplaySettings { get; set; } = new List<DisplaySetting>();
 
@@ -68,6 +79,143 @@ namespace DisplayProfileManager.Core
         {
             return Name;
         }
+    }
+
+    /// <summary>
+    /// Información de ruta CCD (DisplayConfigPathInfo) - estilo MonitorSwitcherGUI
+    /// </summary>
+    public class CcdPathInfo
+    {
+        [JsonProperty("sourceAdapterId")]
+        public string SourceAdapterId { get; set; } = string.Empty;
+
+        [JsonProperty("sourceId")]
+        public uint SourceId { get; set; }
+
+        [JsonProperty("sourceModeInfoIdx")]
+        public uint SourceModeInfoIdx { get; set; }
+
+        [JsonProperty("sourceStatusFlags")]
+        public uint SourceStatusFlags { get; set; }
+
+        [JsonProperty("targetAdapterId")]
+        public string TargetAdapterId { get; set; } = string.Empty;
+
+        [JsonProperty("targetId")]
+        public uint TargetId { get; set; }
+
+        [JsonProperty("targetModeInfoIdx")]
+        public uint TargetModeInfoIdx { get; set; }
+
+        [JsonProperty("outputTechnology")]
+        public uint OutputTechnology { get; set; }
+
+        [JsonProperty("rotation")]
+        public uint Rotation { get; set; }
+
+        [JsonProperty("scaling")]
+        public uint Scaling { get; set; }
+
+        [JsonProperty("refreshRateNumerator")]
+        public uint RefreshRateNumerator { get; set; }
+
+        [JsonProperty("refreshRateDenominator")]
+        public uint RefreshRateDenominator { get; set; }
+
+        [JsonProperty("scanLineOrdering")]
+        public uint ScanLineOrdering { get; set; }
+
+        [JsonProperty("targetAvailable")]
+        public bool TargetAvailable { get; set; }
+
+        [JsonProperty("targetStatusFlags")]
+        public uint TargetStatusFlags { get; set; }
+
+        [JsonProperty("flags")]
+        public uint Flags { get; set; }
+    }
+
+    /// <summary>
+    /// Información de modo CCD (DisplayConfigModeInfo) - estilo MonitorSwitcherGUI
+    /// </summary>
+    public class CcdModeInfo
+    {
+        [JsonProperty("infoType")]
+        public uint InfoType { get; set; } // 1=Source, 2=Target
+
+        [JsonProperty("id")]
+        public uint Id { get; set; }
+
+        [JsonProperty("adapterId")]
+        public string AdapterId { get; set; } = string.Empty;
+
+        // Source mode (si InfoType == 1)
+        [JsonProperty("sourceWidth")]
+        public uint SourceWidth { get; set; }
+
+        [JsonProperty("sourceHeight")]
+        public uint SourceHeight { get; set; }
+
+        [JsonProperty("sourcePixelFormat")]
+        public uint SourcePixelFormat { get; set; }
+
+        [JsonProperty("sourcePositionX")]
+        public int SourcePositionX { get; set; }
+
+        [JsonProperty("sourcePositionY")]
+        public int SourcePositionY { get; set; }
+
+        // Target mode (si InfoType == 2)
+        [JsonProperty("targetPixelRate")]
+        public long TargetPixelRate { get; set; }
+
+        [JsonProperty("targetHSyncNumerator")]
+        public uint TargetHSyncNumerator { get; set; }
+
+        [JsonProperty("targetHSyncDenominator")]
+        public uint TargetHSyncDenominator { get; set; }
+
+        [JsonProperty("targetVSyncNumerator")]
+        public uint TargetVSyncNumerator { get; set; }
+
+        [JsonProperty("targetVSyncDenominator")]
+        public uint TargetVSyncDenominator { get; set; }
+
+        [JsonProperty("targetActiveWidth")]
+        public uint TargetActiveWidth { get; set; }
+
+        [JsonProperty("targetActiveHeight")]
+        public uint TargetActiveHeight { get; set; }
+
+        [JsonProperty("targetTotalWidth")]
+        public uint TargetTotalWidth { get; set; }
+
+        [JsonProperty("targetTotalHeight")]
+        public uint TargetTotalHeight { get; set; }
+
+        [JsonProperty("targetVideoStandard")]
+        public uint TargetVideoStandard { get; set; }
+
+        [JsonProperty("targetScanLineOrdering")]
+        public uint TargetScanLineOrdering { get; set; }
+    }
+
+    /// <summary>
+    /// Información adicional del monitor (EDID, nombres) - estilo MonitorSwitcherGUI
+    /// </summary>
+    public class MonitorAdditionalInfo
+    {
+        [JsonProperty("monitorFriendlyDevice")]
+        public string MonitorFriendlyDevice { get; set; } = string.Empty;
+
+        [JsonProperty("monitorDevicePath")]
+        public string MonitorDevicePath { get; set; } = string.Empty;
+
+        [JsonProperty("edidManufactureId")]
+        public ushort EdidManufactureId { get; set; }
+
+        [JsonProperty("edidProductCodeId")]
+        public ushort EdidProductCodeId { get; set; }
     }
 
     public class DisplaySetting

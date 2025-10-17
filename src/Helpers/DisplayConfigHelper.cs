@@ -28,7 +28,7 @@ namespace DisplayProfileManager.Helpers
             IntPtr currentTopologyId);
 
         [DllImport("user32.dll")]
-        private static extern int SetDisplayConfig(
+        public static extern int SetDisplayConfig(
             uint numPathArrayElements,
             [In] DISPLAYCONFIG_PATH_INFO[] pathArray,
             uint numModeInfoArrayElements,
@@ -36,13 +36,13 @@ namespace DisplayProfileManager.Helpers
             SetDisplayConfigFlags flags);
 
         [DllImport("user32.dll")]
-        private static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SOURCE_DEVICE_NAME deviceName);
+        public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SOURCE_DEVICE_NAME deviceName);
 
         [DllImport("user32.dll")]
-        private static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_TARGET_DEVICE_NAME deviceName);
+        public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_TARGET_DEVICE_NAME deviceName);
 
         [DllImport("user32.dll")]
-        private static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO colorInfo);
+        public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO colorInfo);
 
         [DllImport("user32.dll")]
         private static extern int DisplayConfigSetDeviceInfo(ref DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE colorState);
@@ -1265,7 +1265,63 @@ namespace DisplayProfileManager.Helpers
             return new LUID { HighPart = 0, LowPart = 0 };
         }
 
+        public static string LuidToString(LUID luid)
+        {
+            return $"{luid.HighPart:X8}{luid.LowPart:X8}";
+        }
 
+        /// <summary>
+        /// Obtiene las estructuras CCD completas (paths y modes) del sistema actual - estilo MonitorSwitcherGUI
+        /// </summary>
+        public static bool GetCcdData(out DISPLAYCONFIG_PATH_INFO[] paths, out DISPLAYCONFIG_MODE_INFO[] modes)
+        {
+            paths = null;
+            modes = null;
+
+            try
+            {
+                uint pathCount = 0;
+                uint modeCount = 0;
+
+                // Obtener tamaños de buffer para paths activos
+                int result = GetDisplayConfigBufferSizes(
+                    QueryDisplayConfigFlags.QDC_ONLY_ACTIVE_PATHS,
+                    out pathCount,
+                    out modeCount);
+
+                if (result != ERROR_SUCCESS)
+                {
+                    logger.Error($"GetDisplayConfigBufferSizes failed with error: {result}");
+                    return false;
+                }
+
+                paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
+                modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
+
+                // Consultar configuración de display activa
+                result = QueryDisplayConfig(
+                    QueryDisplayConfigFlags.QDC_ONLY_ACTIVE_PATHS,
+                    ref pathCount,
+                    paths,
+                    ref modeCount,
+                    modes,
+                    IntPtr.Zero);
+
+                if (result != ERROR_SUCCESS)
+                {
+                    logger.Error($"QueryDisplayConfig failed with error: {result}");
+                    return false;
+                }
+
+                logger.Info($"GetCcdData: Captured {pathCount} paths and {modeCount} modes");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "Error getting CCD data");
+                return false;
+            }
+        }
 
         #endregion
     }
